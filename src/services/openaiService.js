@@ -1,9 +1,8 @@
-require("dotenv").config();
-
-const openai = require("../config/openaiClient");
+const getOpenAIClient = require("../config/openaiClient");
 
 async function getEmbedding(text, model = process.env.OPENAI_EMBEDDING_MODEL) {
   try {
+    const openai = await getOpenAIClient();
     const sanitizedText = text.replace(/\n/g, " ");
     const response = await openai.embeddings.create({
       model,

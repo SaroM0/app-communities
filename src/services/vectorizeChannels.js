@@ -1,6 +1,6 @@
 require("dotenv").config();
 const pool = require("../config/db");
-const { Pinecone } = require("@pinecone-database/pinecone");
+const pinecone = require("../config/pineconeClient");
 const { getEmbedding } = require("./openaiService");
 
 async function createIndexesForChannels() {
@@ -14,10 +14,7 @@ async function createIndexesForChannels() {
     );
     console.log(`Found ${channels.length} channels with messages.`);
 
-    const pinecone = new Pinecone({
-      apiKey: process.env.PINECONE_API_KEY,
-    });
-
+    // Para cada canal, se procesa cada mensaje individualmente
     for (const channel of channels) {
       const [rows] = await pool.query(
         `SELECT m.discord_id AS message_id, m.content, m.created_at,
@@ -38,18 +35,17 @@ async function createIndexesForChannels() {
         continue;
       }
 
-      // En lugar de agrupar por usuario, se genera un embedding por cada mensaje.
+      // Se genera un embedding por cada mensaje.
       const embeddingsData = [];
       for (const row of rows) {
         let text = row.content;
-        // Si el mensaje pertenece a un thread, se agrega el título del thread como contexto.
+        // Si el mensaje pertenece a un thread, se añade el título del thread como contexto.
         if (row.thread_id) {
           text = `[Thread: ${row.thread_title}] ${text}`;
         }
-        // Se obtiene el embedding para el texto del mensaje.
         const embedding = await getEmbedding(text);
         embeddingsData.push({
-          id: row.message_id.toString(), // Usamos el id del mensaje como identificador del vector.
+          id: row.message_id.toString(), // Se usa el id del mensaje como identificador del vector.
           values: embedding,
           metadata: {
             user_id: row.user_id,

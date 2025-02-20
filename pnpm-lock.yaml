@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@pinecone-database/pinecone':
+        specifier: ^5.0.0
+        version: 5.0.0
       axios:
         specifier: ^1.7.9
         version: 1.7.9
@@ -53,6 +56,10 @@ packages:
   '@discordjs/ws@1.2.1':
     resolution: {integrity: sha512-PBvenhZG56a6tMWF/f4P6f4GxZKJTBG95n7aiGSPTnodmz4N5g60t79rSIAq7ywMbv8A4jFtexMruH+oe51aQQ==}
     engines: {node: '>=16.11.0'}
+
+  '@pinecone-database/pinecone@5.0.0':
+    resolution: {integrity: sha512-Qn7hn+NIkE1g4nBDIRX8jmI9TSesqNkFa4J2wHr407ja6RA8Ma7+WPZA0L+18msQK5ZQ9r2KA/EO1tCW2XpQJg==}
+    engines: {node: '>=18.0.0'}
 
   '@sapphire/async-queue@1.5.5':
     resolution: {integrity: sha512-cvGzxbba6sav2zZkH8GPf2oGk9yYoD5qrNWdu9fRehifgnFZJMV+nuy2nON2roRO4yQQ+v7MK/Pktl/HgfsUXg==}
@@ -378,6 +385,8 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  '@pinecone-database/pinecone@5.0.0': {}
 
   '@sapphire/async-queue@1.5.5': {}
 
