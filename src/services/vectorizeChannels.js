@@ -1,23 +1,14 @@
-// src/services/vectorizeChannels.js
 require("dotenv").config();
-const mysql = require("mysql2/promise");
+const pool = require("../config/db");
 const { Pinecone } = require("@pinecone-database/pinecone");
-
-// Importa la función getEmbedding del módulo OpenAI service.
 const { getEmbedding } = require("./openaiService");
 
 async function createIndexesForChannels() {
   try {
-    const connection = await mysql.createConnection({
-      host: process.env.MYSQL_HOST,
-      user: process.env.MYSQL_USER,
-      password: process.env.MYSQL_PASSWORD,
-      database: process.env.MYSQL_DATABASE,
-    });
-    console.log("Connected to the MySQL database.");
+    console.log("Using connection pool from config/db.js");
 
-    // Consulta para obtener canales que tengan mensajes.
-    const [channels] = await connection.execute(
+    // Se obtienen los canales que tienen al menos un mensaje.
+    const [channels] = await pool.query(
       `SELECT id, name, channel_type FROM channel
        WHERE id IN (SELECT DISTINCT channel_id FROM message)`
     );
@@ -28,7 +19,7 @@ async function createIndexesForChannels() {
     });
 
     for (const channel of channels) {
-      const [rows] = await connection.execute(
+      const [rows] = await pool.query(
         `SELECT m.discord_id AS message_id, m.content, m.created_at,
                 u.id AS user_id, u.name AS user_name,
                 t.id AS thread_id, t.title AS thread_title
@@ -47,37 +38,28 @@ async function createIndexesForChannels() {
         continue;
       }
 
-      // Consolida la interacción por usuario.
-      const userInteractions = {};
+      // En lugar de agrupar por usuario, se genera un embedding por cada mensaje.
+      const embeddingsData = [];
       for (const row of rows) {
-        const uid = row.user_id;
-        if (!userInteractions[uid]) {
-          userInteractions[uid] = {
-            userName: row.user_name,
-            messages: [],
-          };
-        }
         let text = row.content;
+        // Si el mensaje pertenece a un thread, se agrega el título del thread como contexto.
         if (row.thread_id) {
           text = `[Thread: ${row.thread_title}] ${text}`;
         }
-        userInteractions[uid].messages.push(text);
-      }
-
-      // Genera embeddings para cada usuario.
-      const embeddingsData = [];
-      for (const uid in userInteractions) {
-        const interaction = userInteractions[uid];
-        const consolidatedText = interaction.messages.join(" ");
-        const embedding = await getEmbedding(consolidatedText);
+        // Se obtiene el embedding para el texto del mensaje.
+        const embedding = await getEmbedding(text);
         embeddingsData.push({
-          id: uid.toString(),
+          id: row.message_id.toString(), // Usamos el id del mensaje como identificador del vector.
           values: embedding,
           metadata: {
-            user_name: interaction.userName,
+            user_id: row.user_id,
+            user_name: row.user_name,
             channel_id: channel.id,
             channel_name: channel.name,
-            consolidated_text: consolidatedText,
+            message_text: text,
+            created_at: row.created_at,
+            thread_id: row.thread_id || null,
+            thread_title: row.thread_title || null,
           },
         });
       }
@@ -107,8 +89,7 @@ async function createIndexesForChannels() {
       console.log(`Vectors upserted for channel "${channel.name}".`);
     }
 
-    await connection.end();
-    console.log("Database connection closed.");
+    console.log("Finished processing all channels.");
   } catch (error) {
     console.error("Error creating indexes:", error);
   }
