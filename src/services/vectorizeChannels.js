@@ -1,45 +1,95 @@
-// vectorize_channels.js
-import mysql from "mysql2/promise";
-import { Pinecone } from "@pinecone-database/pinecone";
+// src/services/vectorizeChannels.js
+require("dotenv").config();
+const mysql = require("mysql2/promise");
+const { Pinecone } = require("@pinecone-database/pinecone");
+
+// Importa la función getEmbedding del módulo OpenAI service.
+const { getEmbedding } = require("./openaiService");
 
 async function createIndexesForChannels() {
   try {
-    // Connect to the MySQL database
     const connection = await mysql.createConnection({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASS,
-      database: process.env.DB_NAME,
+      host: process.env.MYSQL_HOST,
+      user: process.env.MYSQL_USER,
+      password: process.env.MYSQL_PASSWORD,
+      database: process.env.MYSQL_DATABASE,
     });
     console.log("Connected to the MySQL database.");
 
-    // Query to retrieve channels
-    // "channels" table has at least the columns "id", "name", and "channel_type"
+    // Consulta para obtener canales que tengan mensajes.
     const [channels] = await connection.execute(
-      "SELECT id, name, channel_type FROM channels"
+      `SELECT id, name, channel_type FROM channel
+       WHERE id IN (SELECT DISTINCT channel_id FROM message)`
     );
-    console.log(`Found ${channels.length} channels.`);
+    console.log(`Found ${channels.length} channels with messages.`);
 
-    // Initialize the Pinecone client
     const pinecone = new Pinecone({
-      apiKey: process.env.PINECONE_API_KEY, // Set this variable with your Pinecone API key
+      apiKey: process.env.PINECONE_API_KEY,
     });
 
-    // Default value for vector dimension (adjust as needed)
-    const defaultDimension = 2;
-
-    // For each channel, create an index in Pinecone
     for (const channel of channels) {
-      // Define the index name based on the channel id
+      const [rows] = await connection.execute(
+        `SELECT m.discord_id AS message_id, m.content, m.created_at,
+                u.id AS user_id, u.name AS user_name,
+                t.id AS thread_id, t.title AS thread_title
+         FROM message m
+         JOIN \`user\` u ON m.user_id = u.id
+         LEFT JOIN thread t ON m.thread_id = t.id
+         WHERE m.channel_id = ?
+         ORDER BY m.created_at ASC`,
+        [channel.id]
+      );
+
+      if (rows.length === 0) {
+        console.log(
+          `Channel "${channel.name}" (id ${channel.id}) has no messages.`
+        );
+        continue;
+      }
+
+      // Consolida la interacción por usuario.
+      const userInteractions = {};
+      for (const row of rows) {
+        const uid = row.user_id;
+        if (!userInteractions[uid]) {
+          userInteractions[uid] = {
+            userName: row.user_name,
+            messages: [],
+          };
+        }
+        let text = row.content;
+        if (row.thread_id) {
+          text = `[Thread: ${row.thread_title}] ${text}`;
+        }
+        userInteractions[uid].messages.push(text);
+      }
+
+      // Genera embeddings para cada usuario.
+      const embeddingsData = [];
+      for (const uid in userInteractions) {
+        const interaction = userInteractions[uid];
+        const consolidatedText = interaction.messages.join(" ");
+        const embedding = await getEmbedding(consolidatedText);
+        embeddingsData.push({
+          id: uid.toString(),
+          values: embedding,
+          metadata: {
+            user_name: interaction.userName,
+            channel_id: channel.id,
+            channel_name: channel.name,
+            consolidated_text: consolidatedText,
+          },
+        });
+      }
+
       const indexName = `channel_${channel.id}`;
       console.log(
         `Creating index for channel "${channel.name}" with name "${indexName}"`
       );
 
-      // Create the index in Pinecone
       await pinecone.createIndex({
         name: indexName,
-        dimension: defaultDimension,
+        dimension: embeddingsData[0].values.length,
         metric: "cosine",
         spec: {
           serverless: {
@@ -49,9 +99,14 @@ async function createIndexesForChannels() {
         },
       });
       console.log(`Index "${indexName}" created successfully.`);
+
+      await pinecone.upsertIndex({
+        name: indexName,
+        vectors: embeddingsData,
+      });
+      console.log(`Vectors upserted for channel "${channel.name}".`);
     }
 
-    // Close the database connection
     await connection.end();
     console.log("Database connection closed.");
   } catch (error) {
