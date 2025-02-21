@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const pool = require("../../config/db");
 const { generateText } = require("../openaiServices/openaiService");
 
 /**
@@ -9,7 +10,10 @@ const { generateText } = require("../openaiServices/openaiService");
  * @returns {Promise<string>} The content of the schema summary.
  */
 async function getDatabaseSchemaSummary() {
-  const filePath = path.join(__dirname, "../config/dbSchemaSummary.md");
+  const filePath = path.join(
+    __dirname,
+    "../../config/context/dbSchemaSummary.md"
+  );
   try {
     const schema = await fs.promises.readFile(filePath, "utf8");
     return schema;
@@ -20,8 +24,25 @@ async function getDatabaseSchemaSummary() {
 }
 
 /**
+ * Executes a SQL query using the database pool.
+ *
+ * @param {string} query - The SQL query to be executed.
+ * @returns {Promise<any>} The result of the SQL query.
+ */
+function executeSQLQuery(query) {
+  return new Promise((resolve, reject) => {
+    pool.query(query, (error, results) => {
+      if (error) {
+        return reject(error);
+      }
+      resolve(results);
+    });
+  });
+}
+
+/**
  * Generates a SQL query from a natural language prompt by using the OpenAI API.
- * The database schema is provided as context via a system message and the query
+ * The database schema is provided as context via a system message, and the query
  * is returned in a structured output.
  *
  * @param {string} userPrompt - The natural language description of the desired query.
@@ -63,20 +84,159 @@ Description: ${userPrompt}
       required: ["sql"],
     };
 
+    const contextualTool = {
+      type: "function",
+      function: {
+        name: "generate_contextualized_sql_query",
+        description:
+          "If there is an issue in the query or if you need specific information to build the complete query, use this function",
+        parameters: {
+          type: "object",
+          properties: {
+            userPrompt: {
+              type: "string",
+              description:
+                "The natural language prompt for generating the SQL query.",
+            },
+          },
+          additionalProperties: false,
+          required: ["userPrompt"],
+        },
+        strict: true,
+      },
+    };
+
     // Call the OpenAI API with the messages and structured output requirements.
     const result = await generateText("", {
-      model: "gpt-4o", // Ajusta el modelo si es necesario.
-      max_tokens: 300,
-      max_completion_tokens: 500,
-      temperature: 0.2,
+      model: "o3-mini",
+      max_tokens: 5000,
+      max_completion_tokens: 5000,
       reasoningEffort: "high",
-      jsonSchema, // Forzamos el formato JSON según el esquema definido.
+      jsonSchema,
+      tools: [contextualTool],
       messages: [systemMessage, userMessage],
     });
+
+    if (Array.isArray(result) && result.length > 0 && result[0].function) {
+      const toolCall = result[0];
+      if (toolCall.function.name === "generate_contextualized_sql_query") {
+        const args = JSON.parse(toolCall.function.arguments);
+        const finalSQL = await generateContextualizedSQLQueryWithExecution(
+          args.userPrompt
+        );
+        return finalSQL;
+      }
+    }
 
     return result.sql;
   } catch (error) {
     console.error("Error generating SQL query:", error);
+    throw error;
+  }
+}
+
+/**
+ * Decomposes a complex natural language prompt into sub-queries that help gather
+ * additional context needed to build a complete SQL query.
+ *
+ * @param {string} userPrompt - The complex natural language prompt.
+ * @returns {Promise<string[]>} An array of sub-query strings.
+ */
+async function decomposePromptForContext(userPrompt) {
+  const decompositionPrompt = `
+You are a SQL expert. Decompose the following prompt into sub-queries that help gather additional context needed to generate a complete SQL query. 
+
+When decomposing, consider the following:
+- Verify if the search criteria might have ambiguities (e.g., the user name "arturo" could appear as "arturo_henao", "art", "ahc", etc.).
+- Generate sub-queries that extract all possible candidates or relevant data to confirm the correct match.
+- If needed, include a sub-query that retrieves a list of all user names (or a filtered list using a LIKE condition) to allow further verification.
+- Each sub-query should be a complete SQL snippet that can be executed independently to gather part of the required context.
+
+Return the answer in JSON format with a key "subQueries" that is an array of strings.
+
+Prompt: "${userPrompt}"
+  `.trim();
+
+  // Define the JSON Schema for structured outputs.
+  const jsonSchema = {
+    type: "object",
+    properties: {
+      subQueries: {
+        type: "array",
+        items: { type: "string" },
+        description: "List of sub-queries providing additional context.",
+      },
+    },
+    additionalProperties: false,
+    required: ["subQueries"],
+  };
+
+  // Call the OpenAI API to decompose the prompt.
+  const result = await generateText(decompositionPrompt, {
+    model: "o3-mini",
+    max_tokens: 5000,
+    max_completion_tokens: 5000,
+    reasoningEffort: "high",
+    jsonSchema,
+  });
+
+  return result.subQueries;
+}
+
+/**
+ * Executes each sub-query to fetch additional context from the database.
+ *
+ * @param {string[]} subQueries - An array of SQL sub-query strings.
+ * @returns {Promise<string>} A combined context string with results from sub-queries.
+ */
+async function executeSubQueries(subQueries) {
+  const contextResults = [];
+
+  for (const query of subQueries) {
+    try {
+      const result = await executeSQLQuery(query);
+      contextResults.push(
+        `Query: ${query} -> Result: ${JSON.stringify(result)}`
+      );
+    } catch (error) {
+      console.error(`Error executing sub-query: ${query}`, error);
+      contextResults.push(`Query: ${query} -> Result: Error executing query`);
+    }
+  }
+
+  return contextResults.join("\n");
+}
+
+/**
+ * Generates a final SQL query from a complex prompt by:
+ * 1. Decomposing the prompt into sub-queries for additional context.
+ * 2. Executing these sub-queries to gather context from the database.
+ * 3. Enriching the original prompt with the additional context.
+ * 4. Calling generateSQLQuery with the enriched prompt to obtain the complete SQL query.
+ *
+ * @param {string} userPrompt - The original complex natural language prompt.
+ * @returns {Promise<string>} The final generated SQL query.
+ */
+async function generateContextualizedSQLQueryWithExecution(userPrompt) {
+  console.log("Generating contextualized SQL query with execution...");
+  try {
+    // Step 1: Decompose the prompt to get contextual sub-queries.
+    const subQueries = await decomposePromptForContext(userPrompt);
+
+    // Step 2: Execute each sub-query to get additional context.
+    const additionalContext = await executeSubQueries(subQueries);
+
+    // Step 3: Enrich the original prompt with the additional context.
+    const enrichedPrompt = `${userPrompt}. Additional context from database queries:\n${additionalContext}`;
+
+    // Step 4: Generate the final SQL query using the enriched prompt.
+    const finalSQL = await generateSQLQuery(enrichedPrompt);
+    return finalSQL;
+  } catch (error) {
+    console.error(
+      "Error generating contextualized SQL query with execution:",
+      error
+    );
     throw error;
   }
 }
