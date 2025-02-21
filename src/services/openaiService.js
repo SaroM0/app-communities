@@ -5,13 +5,16 @@ const getOpenAIClient = require("../config/openaiClient");
  * Asynchronously generates an embedding for the provided text using the OpenAI API.
  *
  * @param {string} text - The input text for which the embedding will be generated.
- * @param {string} [model=process.env.OPENAI_EMBEDDING_MODEL]
+ * @param {string} [model=process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small"] -
  *        The OpenAI embedding model to use. Defaults to the environment variable
- *        OPENAI_EMBEDDING_MODEL.
+ *        OPENAI_EMBEDDING_MODEL if available; otherwise, it uses "text-embedding-3-small".
  * @returns {Promise<number[]>} A promise that resolves with the embedding array.
  * @throws {Error} If there is an error generating the embedding or if no embedding data is received.
  */
-async function getEmbedding(text, model = process.env.OPENAI_EMBEDDING_MODEL) {
+async function getEmbedding(
+  text,
+  model = process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small"
+) {
   try {
     // Validate input: text must be a non-empty string.
     if (!text || typeof text !== "string" || text.trim() === "") {
@@ -51,6 +54,10 @@ async function getEmbedding(text, model = process.env.OPENAI_EMBEDDING_MODEL) {
  *
  * @param {string} prompt - The prompt to generate a response for.
  * @param {object} [options={}] - Additional options for text generation.
+ * @param {string} [options.model="gpt-4o"] - The model to use for text generation.
+ * @param {number} [options.max_tokens=150] - The maximum number of visible tokens to generate.
+ * @param {number} [options.max_completion_tokens] - The total number of tokens generated including reasoning tokens.
+ * @param {number} [options.temperature=0.7] - The temperature to control response randomness.
  * @param {object} [options.jsonSchema] - Optional JSON Schema for structured outputs.
  * @param {Array} [options.tools] - Optional tools array for function calling.
  * @param {string} [options.reasoningEffort="medium"] - The desired reasoning effort ("low", "medium", "high").
@@ -63,16 +70,16 @@ async function generateText(prompt, options = {}) {
     const openai = await getOpenAIClient();
 
     // Set default options for text generation.
-    const model = "o3-mini";
-    const max_tokens = 1000;
-    const temperature = 0.7;
-    const reasoningEffort = "medium";
+    const model = options.model || "gpt-4o";
+    const max_tokens = options.max_tokens || 150;
+    const temperature = options.temperature || 0.7;
+    const reasoningEffort = options.reasoningEffort || "medium";
 
     // Construct messages for the chat completion request.
     const messages = [
       {
-        role: "",
-        content: "",
+        role: "developer",
+        content: "You are a helpful assistant.",
       },
       {
         role: "user",
