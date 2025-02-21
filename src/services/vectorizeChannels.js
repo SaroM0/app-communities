@@ -55,6 +55,11 @@ async function createIndexesForChannels() {
       // Process each message row to generate embeddings.
       for (const row of rows) {
         // Start with the original message content.
+
+        if (!row.content || row.content.trim() === "") {
+          continue;
+        }
+
         let text = row.content;
 
         // If the message is part of a thread, prepend the thread title for additional context.

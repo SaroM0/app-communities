@@ -1,5 +1,3 @@
-// src/services/discordService.js
-
 // Import the Discord client configuration.
 const client = require("../config/discordClient");
 // Import the database connection pool.
@@ -136,8 +134,11 @@ async function saveThread(parentChannelInternalId, thread) {
       description = VALUES(description),
       id = LAST_INSERT_ID(id)
   `;
+  // Use thread.name if available, otherwise thread.title.
   const title = thread.name || thread.title;
+  // Use thread.topic as description if available.
   const description = thread.topic || "";
+  // Use thread.createdAt if available, otherwise current date.
   const created_at = thread.createdAt || new Date();
   const [result] = await pool.query(query, [
     thread.id,
@@ -152,7 +153,7 @@ async function saveThread(parentChannelInternalId, thread) {
 /**
  * Inserts or updates a message in the database and records the user's participation in the channel.
  * If the message belongs to a thread, the internal ID of the thread is provided.
- * Additionally, attachments and reactions are processed.
+ * Additionally, attachments, reactions, and mentions are processed.
  *
  * @param {number} serverInternalId - The internal ID of the server.
  * @param {number} channelInternalId - The internal ID of the channel.
@@ -237,12 +238,64 @@ async function saveMessage(
       );
     }
   }
+
+  // Process message mentions.
+  await saveMessageMentions(messageInternalId, message);
+
   return messageInternalId;
 }
 
 /**
+ * Processes and saves mentions from a Discord message into the message_mention table.
+ *
+ * @param {number} messageInternalId - The internal ID of the message.
+ * @param {object} message - The Discord message object.
+ */
+async function saveMessageMentions(messageInternalId, message) {
+  // Process user mentions.
+  if (message.mentions.users && message.mentions.users.size > 0) {
+    for (const user of message.mentions.users.values()) {
+      const mentionQuery = `
+        INSERT INTO message_mention (message_id, mention_type, target_id, created_at)
+        VALUES (?, 'user', ?, ?)
+      `;
+      await pool.query(mentionQuery, [messageInternalId, user.id, new Date()]);
+    }
+  }
+
+  // Process role mentions.
+  if (message.mentions.roles && message.mentions.roles.size > 0) {
+    for (const role of message.mentions.roles.values()) {
+      const mentionQuery = `
+        INSERT INTO message_mention (message_id, mention_type, target_id, created_at)
+        VALUES (?, 'role', ?, ?)
+      `;
+      await pool.query(mentionQuery, [messageInternalId, role.id, new Date()]);
+    }
+  }
+
+  // Process @everyone and @here mentions.
+  if (message.mentions.everyone) {
+    if (message.content.includes("@everyone")) {
+      const mentionQuery = `
+        INSERT INTO message_mention (message_id, mention_type, target_id, created_at)
+        VALUES (?, 'all', NULL, ?)
+      `;
+      await pool.query(mentionQuery, [messageInternalId, new Date()]);
+    }
+    if (message.content.includes("@here")) {
+      const mentionQuery = `
+        INSERT INTO message_mention (message_id, mention_type, target_id, created_at)
+        VALUES (?, 'here', NULL, ?)
+      `;
+      await pool.query(mentionQuery, [messageInternalId, new Date()]);
+    }
+  }
+}
+
+/**
  * Inserts or updates a role in the database.
- * The "discord_id" column is omitted as the "role" table does not have it.
+ * The "discord_id" column is omitted as the "role" table does not havelo.
  * A NULL is inserted into the id column to trigger auto-increment.
  *
  * @param {object} role - The Discord role object.
@@ -274,8 +327,8 @@ async function saveRole(role) {
  * 3. Iterates over each guild (server):
  *    a) Saves the server.
  *    b) Processes text-based channels (excluding threads) and saves their messages.
- *    c) For each channel, fetches both active and archived threads, saves them, and then saves their messages.
- * 4. Logs a message to the console upon completion of processing each server.
+ *    c) For each channel, fetches both active and archived threads, saves them (solo si son hilos válidos) y luego guarda sus mensajes.
+ * 4. Logs a message a la consola al finalizar el procesamiento de cada servidor.
  */
 client.once("ready", async () => {
   try {
@@ -386,7 +439,13 @@ client.once("ready", async () => {
         }
         // Process each thread.
         for (const [threadId, thread] of threads) {
-          if (!thread.isTextBased()) continue;
+          // Asegurarse de que el objeto es de un hilo válido comprobando su tipo.
+          if (![10, 11, 12].includes(thread.type)) {
+            console.warn(
+              `Channel ${thread.id} is not a valid thread type. Skipping.`
+            );
+            continue;
+          }
           const parentChannelInternalId = parentChannelMap[thread.parentId];
           if (!parentChannelInternalId) {
             console.warn(
