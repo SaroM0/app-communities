@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { generateText } = require("./openaiService");
+const { generateText } = require("../openaiServices/openaiService");
 
 /**
  * Reads the database schema summary from the file `dbSchemaSummary.md`
@@ -9,7 +9,6 @@ const { generateText } = require("./openaiService");
  * @returns {Promise<string>} The content of the schema summary.
  */
 async function getDatabaseSchemaSummary() {
-  // Construct the file path relative to this service file
   const filePath = path.join(__dirname, "../config/dbSchemaSummary.md");
   try {
     const schema = await fs.promises.readFile(filePath, "utf8");
@@ -30,16 +29,16 @@ async function getDatabaseSchemaSummary() {
  */
 async function generateSQLQuery(userPrompt) {
   try {
-    // Retrieve the database schema summary from the file
+    // Retrieve the database schema summary from the file.
     const schemaSummary = await getDatabaseSchemaSummary();
 
-    // Construct a system message to include the schema context (only sent once per conversation)
+    // Construct a system message with the schema context.
     const systemMessage = {
       role: "system",
       content: `Database Schema:\n${schemaSummary}`,
     };
 
-    // Construct the user message with the SQL conversion instructions
+    // Construct the user message with the SQL conversion instructions.
     const userMessage = {
       role: "user",
       content: `
@@ -50,7 +49,7 @@ Description: ${userPrompt}
       `.trim(),
     };
 
-    // Define the JSON Schema for Structured Outputs
+    // Define the JSON Schema for Structured Outputs.
     const jsonSchema = {
       type: "object",
       properties: {
@@ -64,11 +63,14 @@ Description: ${userPrompt}
       required: ["sql"],
     };
 
-    // Call the OpenAI API with the messages and structured output requirements
+    // Call the OpenAI API with the messages and structured output requirements.
     const result = await generateText("", {
-      temperature: 0.2, // Lower temperature for deterministic output
-      reasoningEffort: "high", // Increase reasoning tokens for complex queries
-      jsonSchema, // Enforce structured output format
+      model: "gpt-4o", // Ajusta el modelo si es necesario.
+      max_tokens: 300,
+      max_completion_tokens: 500,
+      temperature: 0.2,
+      reasoningEffort: "high",
+      jsonSchema, // Forzamos el formato JSON según el esquema definido.
       messages: [systemMessage, userMessage],
     });
 

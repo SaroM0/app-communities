@@ -1,7 +1,7 @@
 // Import the Discord client configuration.
-const client = require("../config/discordClient");
+const client = require("../../config/discordClient");
 // Import the database connection pool.
-const pool = require("../config/db");
+const pool = require("../../config/db");
 
 /**
  * Ensures that the organization "straico" exists in the database and returns its internal ID.

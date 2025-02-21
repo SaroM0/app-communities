@@ -1,5 +1,5 @@
 // Import the function to get an authenticated OpenAI client
-const getOpenAIClient = require("../config/openaiClient");
+const getOpenAIClient = require("../../config/openaiClient");
 
 /**
  * Asynchronously generates an embedding for the provided text using the OpenAI API.
@@ -50,17 +50,16 @@ async function getEmbedding(
 /**
  * Asynchronously generates a text completion using the OpenAI API's chat completions endpoint.
  * This function supports Structured Outputs (via a JSON Schema), Function Calling (via a tools array),
- * and advanced reasoning by allowing configuration of reasoning effort and max completion tokens.
+ * and advanced configuration by allowing token parameters.
  *
  * @param {string} prompt - The prompt to generate a response for.
  * @param {object} [options={}] - Additional options for text generation.
  * @param {string} [options.model="gpt-4o"] - The model to use for text generation.
- * @param {number} [options.max_tokens=150] - The maximum number of visible tokens to generate.
+ * @param {number} [options.max_tokens=150] - The maximum number of visible tokens to generate (used if max_completion_tokens is not provided).
  * @param {number} [options.max_completion_tokens] - The total number of tokens generated including reasoning tokens.
  * @param {number} [options.temperature=0.7] - The temperature to control response randomness.
  * @param {object} [options.jsonSchema] - Optional JSON Schema for structured outputs.
  * @param {Array} [options.tools] - Optional tools array for function calling.
- * @param {string} [options.reasoningEffort="medium"] - The desired reasoning effort ("low", "medium", "high").
  * @returns {Promise<string|object>} A promise that resolves with the generated text, structured output, or function call details.
  * @throws {Error} If there is an error generating the text or if no response is received.
  */
@@ -69,14 +68,10 @@ async function generateText(prompt, options = {}) {
     // Get an authenticated OpenAI client.
     const openai = await getOpenAIClient();
 
-    // Set default options for text generation.
+    // Set default options.
     const model = options.model || "gpt-4o";
-    const max_tokens = options.max_tokens || 150;
     const temperature = options.temperature || 0.7;
-    const reasoningEffort = options.reasoningEffort || "medium";
-
-    // Construct messages for the chat completion request.
-    const messages = [
+    const messages = options.messages || [
       {
         role: "developer",
         content: "You are a helpful assistant.",
@@ -91,15 +86,14 @@ async function generateText(prompt, options = {}) {
     let requestOptions = {
       model,
       messages,
-      max_tokens,
       temperature,
-      // Set the reasoning effort to control internal chain-of-thought tokens.
-      reasoning_effort: reasoningEffort,
     };
 
-    // If max_completion_tokens is provided, include it to control total tokens (reasoning + visible).
+    // Use max_completion_tokens if provided; otherwise, use max_tokens.
     if (options.max_completion_tokens) {
       requestOptions.max_completion_tokens = options.max_completion_tokens;
+    } else {
+      requestOptions.max_tokens = options.max_tokens || 150;
     }
 
     // Enable Structured Outputs if a JSON Schema is provided.
@@ -107,6 +101,7 @@ async function generateText(prompt, options = {}) {
       requestOptions.response_format = {
         type: "json_schema",
         json_schema: {
+          name: "structured_output",
           strict: true,
           schema: options.jsonSchema,
         },
@@ -121,13 +116,24 @@ async function generateText(prompt, options = {}) {
     // Request a text completion from OpenAI's chat completions endpoint.
     const response = await openai.chat.completions.create(requestOptions);
 
-    // If Structured Outputs were requested, return the parsed structured response.
+    const message = response.choices[0].message;
+
+    // If Structured Outputs were requested, try to return the parsed structured response.
     if (options.jsonSchema) {
-      return response.choices[0].message.parsed;
+      if (message.parsed) {
+        return message.parsed;
+      }
+      // Fallback: try to parse message.content as JSON.
+      try {
+        return JSON.parse(message.content);
+      } catch (parseError) {
+        throw new Error(
+          "Structured output not available and content is not valid JSON."
+        );
+      }
     }
 
-    // If function calling is enabled and the model returned tool_calls, return them along with any text.
-    const message = response.choices[0].message;
+    // If function calling is enabled and tool_calls exist, return them along with any text.
     if (message.tool_calls && message.tool_calls.length > 0) {
       return {
         toolCalls: message.tool_calls,

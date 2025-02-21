@@ -1,8 +1,11 @@
 // Import the getEmbedding and generateText functions from the OpenAI service
-const { getEmbedding, generateText } = require("./openaiService");
+const {
+  getEmbedding,
+  generateText,
+} = require("../openaiServices/openaiService");
 
 // Import the Pinecone client for vector index operations.
-const pinecone = require("../config/pineconeClient");
+const pinecone = require("../../config/pineconeClient");
 
 /**
  * Performs a semantic search on a specific channel's vectorized messages.

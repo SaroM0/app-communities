@@ -1,7 +1,7 @@
 // Load node-cron to schedule recurring jobs
 const cron = require("node-cron");
 // Import the database connection pool
-const pool = require("../config/db");
+const pool = require("../../config/db");
 // Import the Discord client from your discordService (ensure it's exported there)
 const { client } = require("../services/discordService");
 

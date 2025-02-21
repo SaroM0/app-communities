@@ -2,13 +2,27 @@
 require("dotenv").config();
 
 // Import the database connection pool from the configuration
-const pool = require("../config/db");
+const pool = require("../../config/db");
 
 // Import the Pinecone client from the configuration for vector index operations
-const pinecone = require("../config/pineconeClient");
+const pinecone = require("../../config/pineconeClient");
 
 // Import the getEmbedding function from the OpenAI service to generate text embeddings
-const { getEmbedding } = require("./openaiService");
+const { getEmbedding } = require("../openaiServices/openaiService");
+
+/**
+ * Divide un array en lotes (chunks) de un tamaño dado.
+ * @param {Array} array - El array a dividir.
+ * @param {number} size - El tamaño de cada lote.
+ * @returns {Array<Array>} Un array de lotes.
+ */
+function chunkArray(array, size) {
+  const chunks = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
 
 /**
  * Asynchronously creates vector indexes for channels based on the messages they contain.
@@ -54,8 +68,7 @@ async function createIndexesForChannels() {
 
       // Process each message row to generate embeddings.
       for (const row of rows) {
-        // Start with the original message content.
-
+        // Skip empty message content.
         if (!row.content || row.content.trim() === "") {
           continue;
         }
@@ -135,8 +148,16 @@ async function createIndexesForChannels() {
       // Get the created index object from Pinecone.
       const index = pinecone.index(indexName);
 
-      // Upsert (insert or update) the generated vectors into the index.
-      await index.upsert(embeddingsData, "");
+      // Split the embeddingsData into batches to avoid exceeding the message size limit.
+      const batches = chunkArray(embeddingsData, 100);
+      for (const [i, batch] of batches.entries()) {
+        console.log(
+          `Upserting batch ${i + 1} of ${batches.length} for channel "${
+            channel.name
+          }"...`
+        );
+        await index.upsert(batch, "");
+      }
       console.log(`Vectors upserted for channel "${channel.name}".`);
     }
 
