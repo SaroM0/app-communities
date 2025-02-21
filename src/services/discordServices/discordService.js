@@ -40,10 +40,10 @@ async function ensureOrganization() {
  */
 async function upsertUser(discordUserId, serverInternalId, userName) {
   const query = `
-    INSERT INTO \`user\` (id, discord_id, server_id, name)
+    INSERT INTO \`user\` (id, discord_id, fk_server_id, name)
     VALUES (NULL, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
-      server_id = VALUES(server_id),
+      fk_server_id = VALUES(fk_server_id),
       name = VALUES(name),
       id = LAST_INSERT_ID(id)
   `;
@@ -57,7 +57,7 @@ async function upsertUser(discordUserId, serverInternalId, userName) {
 
 /**
  * Inserts or updates a user's participation in a channel.
- * Assumes that there is a unique constraint on (channel_id, user_id).
+ * Assumes that there is a unique constraint on (fk_channel_id, fk_user_id).
  *
  * @param {number} channelInternalId - The internal ID of the channel.
  * @param {number} userInternalId - The internal ID of the user.
@@ -65,7 +65,7 @@ async function upsertUser(discordUserId, serverInternalId, userName) {
  */
 async function upsertChannelUser(channelInternalId, userInternalId, joinedAt) {
   const query = `
-    INSERT INTO channel_user (channel_id, user_id, joined_at)
+    INSERT INTO channel_user (fk_channel_id, fk_user_id, joined_at)
     VALUES (?, ?, ?)
     ON DUPLICATE KEY UPDATE joined_at = VALUES(joined_at)
   `;
@@ -81,7 +81,7 @@ async function upsertChannelUser(channelInternalId, userInternalId, joinedAt) {
  */
 async function saveServer(server, organizationId) {
   const query = `
-    INSERT INTO server (discord_id, organization_id, name)
+    INSERT INTO server (discord_id, fk_organization_id, name)
     VALUES (?, ?, ?)
     ON DUPLICATE KEY UPDATE
       name = VALUES(name),
@@ -104,7 +104,7 @@ async function saveServer(server, organizationId) {
  */
 async function saveChannel(serverInternalId, channel) {
   const query = `
-    INSERT INTO channel (discord_id, server_id, name)
+    INSERT INTO channel (discord_id, fk_server_id, name)
     VALUES (?, ?, ?)
     ON DUPLICATE KEY UPDATE
       name = VALUES(name),
@@ -127,7 +127,7 @@ async function saveChannel(serverInternalId, channel) {
  */
 async function saveThread(parentChannelInternalId, thread) {
   const query = `
-    INSERT INTO thread (discord_id, channel_id, title, description, created_at)
+    INSERT INTO thread (discord_id, fk_channel_id, title, description, created_at)
     VALUES (?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       title = VALUES(title),
@@ -175,7 +175,7 @@ async function saveMessage(
   );
 
   const query = `
-    INSERT INTO message (discord_id, channel_id, thread_id, user_id, content, created_at)
+    INSERT INTO message (discord_id, fk_channel_id, fk_thread_id, fk_user_id, content, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       content = VALUES(content),
@@ -199,7 +199,7 @@ async function saveMessage(
     await Promise.all(
       Array.from(message.attachments.values()).map(async (attachment) => {
         const attachmentQuery = `
-          INSERT INTO message_attachment (message_id, attachment_url, created_at)
+          INSERT INTO message_attachment (fk_message_id, attachment_url, created_at)
           VALUES (?, ?, ?)
         `;
         await pool.query(attachmentQuery, [
@@ -225,7 +225,7 @@ async function saveMessage(
             user.username
           );
           const reactionQuery = `
-            INSERT INTO message_reaction (message_id, user_id, reaction_type, created_at)
+            INSERT INTO message_reaction (fk_message_id, fk_user_id, reaction_type, created_at)
             VALUES (?, ?, ?, ?)
           `;
           await pool.query(reactionQuery, [
@@ -256,7 +256,7 @@ async function saveMessageMentions(messageInternalId, message) {
   if (message.mentions.users && message.mentions.users.size > 0) {
     for (const user of message.mentions.users.values()) {
       const mentionQuery = `
-        INSERT INTO message_mention (message_id, mention_type, target_id, created_at)
+        INSERT INTO message_mention (fk_message_id, mention_type, target_id, created_at)
         VALUES (?, 'user', ?, ?)
       `;
       await pool.query(mentionQuery, [messageInternalId, user.id, new Date()]);
@@ -267,7 +267,7 @@ async function saveMessageMentions(messageInternalId, message) {
   if (message.mentions.roles && message.mentions.roles.size > 0) {
     for (const role of message.mentions.roles.values()) {
       const mentionQuery = `
-        INSERT INTO message_mention (message_id, mention_type, target_id, created_at)
+        INSERT INTO message_mention (fk_message_id, mention_type, target_id, created_at)
         VALUES (?, 'role', ?, ?)
       `;
       await pool.query(mentionQuery, [messageInternalId, role.id, new Date()]);
@@ -278,14 +278,14 @@ async function saveMessageMentions(messageInternalId, message) {
   if (message.mentions.everyone) {
     if (message.content.includes("@everyone")) {
       const mentionQuery = `
-        INSERT INTO message_mention (message_id, mention_type, target_id, created_at)
+        INSERT INTO message_mention (fk_message_id, mention_type, target_id, created_at)
         VALUES (?, 'all', NULL, ?)
       `;
       await pool.query(mentionQuery, [messageInternalId, new Date()]);
     }
     if (message.content.includes("@here")) {
       const mentionQuery = `
-        INSERT INTO message_mention (message_id, mention_type, target_id, created_at)
+        INSERT INTO message_mention (fk_message_id, mention_type, target_id, created_at)
         VALUES (?, 'here', NULL, ?)
       `;
       await pool.query(mentionQuery, [messageInternalId, new Date()]);
@@ -295,7 +295,7 @@ async function saveMessageMentions(messageInternalId, message) {
 
 /**
  * Inserts or updates a role in the database.
- * The "discord_id" column is omitted as the "role" table does not havelo.
+ * The "discord_id" column is omitted as the "role" table does not have it.
  * A NULL is inserted into the id column to trigger auto-increment.
  *
  * @param {object} role - The Discord role object.
@@ -327,8 +327,8 @@ async function saveRole(role) {
  * 3. Iterates over each guild (server):
  *    a) Saves the server.
  *    b) Processes text-based channels (excluding threads) and saves their messages.
- *    c) For each channel, fetches both active and archived threads, saves them (solo si son hilos válidos) y luego guarda sus mensajes.
- * 4. Logs a message a la consola al finalizar el procesamiento de cada servidor.
+ *    c) For each channel, fetches both active and archived threads, saves them (if they are valid threads) and then saves their messages.
+ * 4. Logs a message to the console after processing each server.
  */
 client.once("ready", async () => {
   try {
@@ -439,7 +439,7 @@ client.once("ready", async () => {
         }
         // Process each thread.
         for (const [threadId, thread] of threads) {
-          // Asegurarse de que el objeto es de un hilo válido comprobando su tipo.
+          // Ensure that the object is a valid thread by checking its type.
           if (![10, 11, 12].includes(thread.type)) {
             console.warn(
               `Channel ${thread.id} is not a valid thread type. Skipping.`

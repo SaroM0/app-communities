@@ -5,7 +5,7 @@ const { generateText } = require("../openaiServices/openaiService");
 
 /**
  * Reads the database schema summary from the file `dbSchemaSummary.md`
- * located in the `src/config` folder.
+ * located in the `src/config/context` folder.
  *
  * @returns {Promise<string>} The content of the schema summary.
  */
@@ -29,15 +29,13 @@ async function getDatabaseSchemaSummary() {
  * @param {string} query - The SQL query to be executed.
  * @returns {Promise<any>} The result of the SQL query.
  */
-function executeSQLQuery(query) {
-  return new Promise((resolve, reject) => {
-    pool.query(query, (error, results) => {
-      if (error) {
-        return reject(error);
-      }
-      resolve(results);
-    });
-  });
+async function executeSQLQuery(query) {
+  try {
+    const [results] = await pool.query(query);
+    return results;
+  } catch (error) {
+    throw error;
+  }
 }
 
 /**
