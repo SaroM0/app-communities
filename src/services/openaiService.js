@@ -5,9 +5,9 @@ const getOpenAIClient = require("../config/openaiClient");
  * Asynchronously generates an embedding for the provided text using the OpenAI API.
  *
  * @param {string} text - The input text for which the embedding will be generated.
- * @param {string} [model=process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small"] -
- *        The OpenAI embedding model to use. It defaults to the environment variable
- *        OPENAI_EMBEDDING_MODEL if available; otherwise, it uses "text-embedding-3-small".
+ * @param {string} [model=process.env.OPENAI_EMBEDDING_MODEL]
+ *        The OpenAI embedding model to use. Defaults to the environment variable
+ *        OPENAI_EMBEDDING_MODEL.
  * @returns {Promise<number[]>} A promise that resolves with the embedding array.
  * @throws {Error} If there is an error generating the embedding or if no embedding data is received.
  */
@@ -39,7 +39,6 @@ async function getEmbedding(text, model = process.env.OPENAI_EMBEDDING_MODEL) {
     // Return the generated embedding.
     return response.data[0].embedding;
   } catch (error) {
-    // Log any errors encountered during the embedding generation process.
     console.error("Error generating embedding:", error);
     throw error;
   }
@@ -47,14 +46,15 @@ async function getEmbedding(text, model = process.env.OPENAI_EMBEDDING_MODEL) {
 
 /**
  * Asynchronously generates a text completion using the OpenAI API's chat completions endpoint.
- * This function sends a prompt along with a developer instruction to guide the response style.
+ * This function supports Structured Outputs (via a JSON Schema), Function Calling (via a tools array),
+ * and advanced reasoning by allowing configuration of reasoning effort and max completion tokens.
  *
  * @param {string} prompt - The prompt to generate a response for.
  * @param {object} [options={}] - Additional options for text generation.
- * @param {string} [options.model="gpt-4o"] - The model to use for text generation.
- * @param {number} [options.max_tokens=150] - The maximum number of tokens to generate.
- * @param {number} [options.temperature=0.7] - The temperature to control response randomness.
- * @returns {Promise<string>} A promise that resolves with the generated text.
+ * @param {object} [options.jsonSchema] - Optional JSON Schema for structured outputs.
+ * @param {Array} [options.tools] - Optional tools array for function calling.
+ * @param {string} [options.reasoningEffort="medium"] - The desired reasoning effort ("low", "medium", "high").
+ * @returns {Promise<string|object>} A promise that resolves with the generated text, structured output, or function call details.
  * @throws {Error} If there is an error generating the text or if no response is received.
  */
 async function generateText(prompt, options = {}) {
@@ -63,15 +63,16 @@ async function generateText(prompt, options = {}) {
     const openai = await getOpenAIClient();
 
     // Set default options for text generation.
-    const model = options.model || "gpt-4o";
-    const max_tokens = options.max_tokens || 150;
-    const temperature = options.temperature || 0.7;
+    const model = "o3-mini";
+    const max_tokens = 1000;
+    const temperature = 0.7;
+    const reasoningEffort = "medium";
 
     // Construct messages for the chat completion request.
     const messages = [
       {
-        role: "developer",
-        content: "You are a helpful assistant.",
+        role: "",
+        content: "",
       },
       {
         role: "user",
@@ -79,20 +80,56 @@ async function generateText(prompt, options = {}) {
       },
     ];
 
-    // Request a text completion from OpenAI's chat completions endpoint.
-    const response = await openai.chat.completions.create({
+    // Build the request options.
+    let requestOptions = {
       model,
       messages,
       max_tokens,
       temperature,
-    });
+      // Set the reasoning effort to control internal chain-of-thought tokens.
+      reasoning_effort: reasoningEffort,
+    };
 
-    // Validate the response and extract the generated text.
-    if (!response.choices || response.choices.length === 0) {
-      throw new Error("No completion choices returned from OpenAI.");
+    // If max_completion_tokens is provided, include it to control total tokens (reasoning + visible).
+    if (options.max_completion_tokens) {
+      requestOptions.max_completion_tokens = options.max_completion_tokens;
     }
-    const generatedText = response.choices[0].message.content;
-    return generatedText;
+
+    // Enable Structured Outputs if a JSON Schema is provided.
+    if (options.jsonSchema) {
+      requestOptions.response_format = {
+        type: "json_schema",
+        json_schema: {
+          strict: true,
+          schema: options.jsonSchema,
+        },
+      };
+    }
+
+    // Include tools for function calling if provided.
+    if (options.tools) {
+      requestOptions.tools = options.tools;
+    }
+
+    // Request a text completion from OpenAI's chat completions endpoint.
+    const response = await openai.chat.completions.create(requestOptions);
+
+    // If Structured Outputs were requested, return the parsed structured response.
+    if (options.jsonSchema) {
+      return response.choices[0].message.parsed;
+    }
+
+    // If function calling is enabled and the model returned tool_calls, return them along with any text.
+    const message = response.choices[0].message;
+    if (message.tool_calls && message.tool_calls.length > 0) {
+      return {
+        toolCalls: message.tool_calls,
+        content: message.content ? message.content.trim() : null,
+      };
+    }
+
+    // Otherwise, return the plain text response.
+    return message.content.trim();
   } catch (error) {
     console.error("Error generating text:", error);
     throw error;
