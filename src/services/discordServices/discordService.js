@@ -198,9 +198,11 @@ async function saveMessage(
   if (message.attachments && message.attachments.size > 0) {
     await Promise.all(
       Array.from(message.attachments.values()).map(async (attachment) => {
+        // The query now uses upsert to avoid duplicate attachment records.
         const attachmentQuery = `
           INSERT INTO message_attachment (fk_message_id, attachment_url, created_at)
           VALUES (?, ?, ?)
+          ON DUPLICATE KEY UPDATE created_at = VALUES(created_at)
         `;
         await pool.query(attachmentQuery, [
           messageInternalId,
@@ -224,9 +226,11 @@ async function saveMessage(
             serverInternalId,
             user.username
           );
+          // The query now uses upsert to avoid duplicate reaction records.
           const reactionQuery = `
             INSERT INTO message_reaction (fk_message_id, fk_user_id, reaction_type, created_at)
             VALUES (?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE created_at = VALUES(created_at)
           `;
           await pool.query(reactionQuery, [
             messageInternalId,
@@ -326,8 +330,9 @@ async function saveRole(role) {
  * 2. Processes the server's roles (excluding the @everyone role).
  * 3. Iterates over each guild (server):
  *    a) Saves the server.
- *    b) Processes text-based channels (excluding threads) and saves their messages.
- *    c) For each channel, fetches both active and archived threads, saves them (if they are valid threads) and then saves their messages.
+ *    b) Processes all members.
+ *    c) Processes text-based channels (excluding threads) and saves their messages.
+ *    d) For each channel, fetches both active and archived threads, saves them (if they are valid threads) and then saves their messages.
  * 4. Logs a message to the console after processing each server.
  */
 client.once("ready", async () => {
@@ -337,6 +342,21 @@ client.once("ready", async () => {
 
     // Iterate over each guild (server) in the Discord client's cache.
     for (const [guildId, server] of client.guilds.cache) {
+      // Save the server and retrieve its internal ID.
+      const serverInternalId = await saveServer(server, organizationId);
+
+      // This fetches absolutely all members, even if they haven't sent messages.
+      await server.members.fetch({ time: 3600000 });
+
+      // Upsert all fetched members into the database.
+      for (const [memberId, member] of server.members.cache) {
+        try {
+          await upsertUser(member.id, serverInternalId, member.user.username);
+        } catch (error) {
+          console.error(`Error saving member ${member.id}:`, error);
+        }
+      }
+
       // Process server roles, skipping the @everyone role (which has the same ID as the server).
       server.roles.cache.forEach(async (role) => {
         if (role.id === server.id) return;
@@ -346,9 +366,6 @@ client.once("ready", async () => {
           console.error(`Error saving role ${role.id}:`, error);
         }
       });
-
-      // Save the server and retrieve its internal ID.
-      const serverInternalId = await saveServer(server, organizationId);
 
       // Filter only text-based channels that are not threads.
       const nonThreadChannels = server.channels.cache.filter(

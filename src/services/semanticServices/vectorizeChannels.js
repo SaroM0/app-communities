@@ -10,11 +10,13 @@ const pinecone = require("../../config/pineconeClient");
 // Import the getEmbedding function from the OpenAI service to generate text embeddings
 const { getEmbedding } = require("../openaiServices/openaiService");
 
+const { sleep } = require("../../utils/functionHandler");
+
 /**
- * Divide un array en lotes (chunks) de un tamaño dado.
- * @param {Array} array - El array a dividir.
- * @param {number} size - El tamaño de cada lote.
- * @returns {Array<Array>} Un array de lotes.
+ * Splits an array into chunks of a given size.
+ * @param {Array} array - The array to split.
+ * @param {number} size - The size of each chunk.
+ * @returns {Array<Array>} An array of chunks.
  */
 function chunkArray(array, size) {
   const chunks = [];
@@ -28,6 +30,7 @@ function chunkArray(array, size) {
  * Asynchronously creates vector indexes for channels based on the messages they contain.
  * The process involves fetching channels with messages, generating embeddings for each message,
  * creating a corresponding Pinecone index, and upserting the vectors into the index.
+ * Updated to work with the new database structure.
  */
 async function createIndexesForChannels() {
   try {
@@ -36,7 +39,7 @@ async function createIndexesForChannels() {
     // Retrieve channels that have at least one associated message.
     const [channels] = await pool.query(
       `SELECT id, name, channel_type FROM channel
-       WHERE id IN (SELECT DISTINCT channel_id FROM message)`
+       WHERE id IN (SELECT DISTINCT fk_channel_id FROM message)`
     );
     console.log(`Found ${channels.length} channels with messages.`);
 
@@ -48,9 +51,9 @@ async function createIndexesForChannels() {
                 u.id AS user_id, u.name AS user_name,
                 t.id AS thread_id, t.title AS thread_title
          FROM message m
-         JOIN \`user\` u ON m.user_id = u.id
-         LEFT JOIN thread t ON m.thread_id = t.id
-         WHERE m.channel_id = ?
+         JOIN \`user\` u ON m.fk_user_id = u.id
+         LEFT JOIN thread t ON m.fk_thread_id = t.id
+         WHERE m.fk_channel_id = ?
          ORDER BY m.created_at ASC`,
         [channel.id]
       );
@@ -102,7 +105,7 @@ async function createIndexesForChannels() {
 
         // Prepare the data for upserting into the Pinecone index.
         embeddingsData.push({
-          id: row.message_id.toString(), // Use the message ID as the vector identifier.
+          id: row.message_id.toString(), // Use the Discord message ID as the vector identifier.
           values: embedding,
           metadata: {
             user_id: row.user_id,
@@ -111,8 +114,8 @@ async function createIndexesForChannels() {
             channel_name: channel.name,
             message_text: text,
             created_at: row.created_at,
-            thread_id: row.thread_id ? row.thread_id.toString() : "", // Convert null to empty string if needed.
-            thread_title: row.thread_title || "", // Default to empty string if thread title is null.
+            thread_id: row.thread_id ? row.thread_id.toString() : "",
+            thread_title: row.thread_title || "",
           },
         });
       }
@@ -134,7 +137,7 @@ async function createIndexesForChannels() {
       // Create a new index in Pinecone with the specified dimension and settings.
       await pinecone.createIndex({
         name: indexName,
-        dimension: embeddingsData[0].values.length, // Set dimension based on the embedding vector length.
+        dimension: embeddingsData[0].values.length, // Dimension based on the embedding vector length.
         metric: "cosine", // Use cosine similarity as the distance metric.
         spec: {
           serverless: {
@@ -145,8 +148,12 @@ async function createIndexesForChannels() {
       });
       console.log(`Index "${indexName}" created successfully.`);
 
+      // Wait for the index to be fully ready before upserting vectors.
+      console.log(`Waiting for index "${indexName}" to be ready...`);
+      await sleep(10000);
+
       // Get the created index object from Pinecone.
-      const index = pinecone.index(indexName);
+      const index = await pinecone.index(indexName);
 
       // Split the embeddingsData into batches to avoid exceeding the message size limit.
       const batches = chunkArray(embeddingsData, 100);
