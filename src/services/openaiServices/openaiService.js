@@ -5,16 +5,13 @@ const getOpenAIClient = require("../../config/openaiClient");
  * Asynchronously generates an embedding for the provided text using the OpenAI API.
  *
  * @param {string} text - The input text for which the embedding will be generated.
- * @param {string} [model=process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small"] -
+ * @param {string} [model=process.env.OPENAI_EMBEDDING_MODEL] -
  *        The OpenAI embedding model to use. Defaults to the environment variable
- *        OPENAI_EMBEDDING_MODEL if available; otherwise, it uses "text-embedding-3-small".
+ *        OPENAI_EMBEDDING_MODEL
  * @returns {Promise<number[]>} A promise that resolves with the embedding array.
  * @throws {Error} If there is an error generating the embedding or if no embedding data is received.
  */
-async function getEmbedding(
-  text,
-  model = process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small"
-) {
+async function getEmbedding(text, model = process.env.OPENAI_EMBEDDING_MODEL) {
   try {
     // Validate input: text must be a non-empty string.
     if (!text || typeof text !== "string" || text.trim() === "") {
