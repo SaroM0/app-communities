@@ -15,6 +15,7 @@ console.log("Select an option:");
 console.log("1. Read information from Discord and save it to the database.");
 console.log("2. Retrieve channels and vectorize the information.");
 console.log("3. Generate SQL Query from natural language prompt.");
+console.log("4. Perform semantic query with context.");
 
 // Prompt the user to input their chosen option.
 rl.question("Enter the option number: ", (answer) => {
@@ -53,10 +54,31 @@ rl.question("Enter the option number: ", (answer) => {
         }
       }
     );
+  } else if (option === "4") {
+    // For option 4, ask the user for a natural language query and channel ID.
+    rl.question("Enter your natural language query: ", (query) => {
+      rl.question("Enter the channel ID: ", async (channelId) => {
+        try {
+          // Import the semantic query service.
+          const {
+            semanticQueryWithContext,
+          } = require("./src/services/semanticServices/semanticSearchService");
+          // Perform the semantic query with context.
+          const answer = await semanticQueryWithContext(query, channelId);
+          // Print the generated answer.
+          console.log("\nSemantic Query Answer:");
+          console.log(answer);
+        } catch (error) {
+          console.error("Error during semantic query:", error);
+        } finally {
+          rl.close();
+        }
+      });
+    });
   } else {
     // Handle invalid options.
     console.log(
-      "Invalid option. Please restart the application and enter 1, 2, or 3."
+      "Invalid option. Please restart the application and enter 1, 2, 3, or 4."
     );
     rl.close();
   }
