@@ -40,7 +40,7 @@ async function sendAssistantMessage(session, userMessageContent, options = {}) {
   const requestOptions = {
     model: options.model || "gpt-4o",
     messages: session.messages,
-    tools: session.tools,
+    functions: session.tools,
     max_tokens: options.max_tokens || 5000,
   };
 
@@ -163,5 +163,4 @@ module.exports = {
   sendAssistantMessage,
   getEmbedding,
   generateText,
-  INITIAL_SYSTEM_MESSAGE,
 };

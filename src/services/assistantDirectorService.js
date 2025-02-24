@@ -1,7 +1,7 @@
 const {
   createAssistantSession,
   sendAssistantMessage,
-} = require("./services/openaiService");
+} = require("./openaiServices/openaiService");
 
 // Import the function calling definitions
 const assistantFunctions = require("../config/assistantFunctions");
@@ -25,7 +25,7 @@ async function runAssistant(userPrompt) {
     assistantFunctions
   );
   console.log("===== Assistant Session Created =====");
-  console.log("Assistant session created:", session);
+  console.log("Assistant session created:");
   console.log("=====================================");
 
   // Send the user prompt and obtain the assistant's response
@@ -46,8 +46,6 @@ async function runAssistant(userPrompt) {
       console.error("Function not found:", functionName);
     }
     console.log("Function result:", result);
-  } else {
-    console.log("Assistant responded:", assistantResponse);
   }
 
   return assistantResponse;
