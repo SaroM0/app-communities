@@ -142,13 +142,15 @@ Description: ${userPrompt}
  */
 async function decomposePromptForContext(userPrompt) {
   const decompositionPrompt = `
-You are a SQL expert. Decompose the following prompt into sub-queries that help gather additional context needed to generate a complete SQL query. 
+You are a SQL expert. Decompose the following prompt into the fewest necessary sub-queries 
+that gather only the essential context needed to generate a complete SQL query.
 
 When decomposing, consider the following:
+- Only generate sub-queries if the additional context is absolutely required.
+- If retrieving the full dataset is not necessary, include a LIMIT clause to restrict the results.
 - Verify if the search criteria might have ambiguities (e.g., the user name "arturo" could appear as "arturo_henao", "art", "ahc", etc.).
-- Generate sub-queries that extract all possible candidates or relevant data to confirm the correct match.
-- If needed, include a sub-query that retrieves a list of all user names (or a filtered list using a LIKE condition) to allow further verification.
-- Each sub-query should be a complete SQL snippet that can be executed independently to gather part of the required context.
+- Generate sub-queries that extract only the most relevant data or candidates to confirm the correct match.
+- Each sub-query should be a complete SQL snippet that can be executed independently to retrieve part of the required context.
 
 Return the answer in JSON format with a key "subQueries" that is an array of strings.
 
