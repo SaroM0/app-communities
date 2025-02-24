@@ -16,35 +16,29 @@ console.log("1. Read information from Discord and save it to the database.");
 console.log("2. Retrieve channels and vectorize the information.");
 console.log("3. Generate SQL Query from natural language prompt.");
 console.log("4. Perform semantic query with context.");
+console.log("5. Use Query Director Assistant.");
 
 // Prompt the user to input their chosen option.
 rl.question("Enter the option number: ", (answer) => {
-  // Trim any extra whitespace from the input.
   const option = answer.trim();
 
   if (option === "1") {
     console.log("Starting Discord service...");
-    // Import and run the Discord service.
     require("./src/services/discordServices/discordService");
     rl.close();
   } else if (option === "2") {
     console.log("Starting channel vectorization...");
-    // Import and run the channel vectorization service.
     require("./src/services/semanticServices/vectorizeChannels");
     rl.close();
   } else if (option === "3") {
-    // For option 3, ask the user for a natural language prompt.
     rl.question(
       "Enter your natural language description for the SQL query: ",
       async (prompt) => {
         try {
-          // Import the SQL query service.
           const {
             generateSQLQuery,
           } = require("./src/services/sqlServices/sqlQueryService");
-          // Generate the SQL query based on the prompt.
           const sqlQuery = await generateSQLQuery(prompt);
-          // Print only the generated SQL query.
           console.log("\nGenerated SQL Query:");
           console.log(sqlQuery);
         } catch (error) {
@@ -55,17 +49,13 @@ rl.question("Enter the option number: ", (answer) => {
       }
     );
   } else if (option === "4") {
-    // For option 4, ask the user for a natural language query and channel ID.
     rl.question("Enter your natural language query: ", (query) => {
       rl.question("Enter the channel ID: ", async (channelId) => {
         try {
-          // Import the semantic query service.
           const {
             semanticQueryWithContext,
           } = require("./src/services/semanticServices/semanticSearchService");
-          // Perform the semantic query with context.
           const answer = await semanticQueryWithContext(query, channelId);
-          // Print the generated answer.
           console.log("\nSemantic Query Answer:");
           console.log(answer);
         } catch (error) {
@@ -75,10 +65,28 @@ rl.question("Enter the option number: ", (answer) => {
         }
       });
     });
+  } else if (option === "5") {
+    // New option to use the Query Director Assistant.
+    rl.question(
+      "Enter your query for the Query Director Assistant: ",
+      async (userQuery) => {
+        try {
+          const {
+            runAssistant,
+          } = require("./src/services/assistantDirectorService");
+          const assistantResponse = await runAssistant(userQuery);
+          console.log("\nAssistant Response:");
+          console.log(assistantResponse);
+        } catch (error) {
+          console.error("Error executing the assistant:", error);
+        } finally {
+          rl.close();
+        }
+      }
+    );
   } else {
-    // Handle invalid options.
     console.log(
-      "Invalid option. Please restart the application and enter 1, 2, 3, or 4."
+      "Invalid option. Please restart the application and enter 1, 2, 3, 4, or 5."
     );
     rl.close();
   }
