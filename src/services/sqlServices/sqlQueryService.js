@@ -15,7 +15,7 @@ const {
 async function getDatabaseSchemaSummary() {
   const filePath = path.join(
     __dirname,
-    "../../config/context/dbSchemaSummary.md"
+    "../../config/dbContext/dbSchemaSummary.md"
   );
   try {
     const schema = await fs.promises.readFile(filePath, "utf8");
@@ -46,8 +46,10 @@ async function executeSQLQuery(query) {
  * The database schema is provided as context via a system message, and the query
  * is returned in a structured output.
  *
+ * **Modified** so that the final SQL gets executed and the database result is returned.
+ *
  * @param {string} userPrompt - The natural language description of the desired query.
- * @returns {Promise<string>} The generated SQL query.
+ * @returns {Promise<any>} The result of the executed SQL query.
  */
 async function generateSQLQuery(userPrompt) {
   try {
@@ -66,6 +68,10 @@ async function generateSQLQuery(userPrompt) {
       content: `
 You are a SQL expert. Convert the following natural language description into a precise SQL query based on the provided database schema.
 Return the result in JSON format with a key "sql" that contains the query.
+
+Remember to:
+- Use backticks for table and column names.
+- Do not include comments.
 
 Description: ${userPrompt}
       `.trim(),
@@ -92,25 +98,34 @@ Description: ${userPrompt}
       max_completion_tokens: 5000,
       reasoningEffort: "high",
       jsonSchema,
-      tools: [semanticQueryWithContextFunction],
+      functions: [semanticQueryWithContextFunction],
       messages: [systemMessage, userMessage],
     });
 
+    // If the OpenAI response calls a function to generate a contextualized query, handle it:
     if (Array.isArray(result) && result.length > 0 && result[0].function) {
       const toolCall = result[0];
       if (toolCall.function.name === "generate_contextualized_sql_query") {
         const args = JSON.parse(toolCall.function.arguments);
+        // generateContextualizedSQLQueryWithExecution returns the final SQL string
         const finalSQL = await generateContextualizedSQLQueryWithExecution(
           args.userPrompt
         );
-        return finalSQL;
+        // Execute the final SQL here and return the results
+        const finalResult = await executeSQLQuery(finalSQL);
+        return finalResult;
       }
     }
 
-    return result.sql;
+    // Otherwise, we have the final SQL in result.sql
+    const finalSQL = result.sql;
+    // Execute the final SQL query
+    const queryResult = await executeSQLQuery(finalSQL);
+
+    // Return the result set instead of just the SQL
+    return queryResult;
   } catch (error) {
     console.error("Error generating SQL query:", error);
-    throw error;
   }
 }
 
@@ -127,6 +142,7 @@ You are a SQL expert. Decompose the following prompt into the fewest necessary s
 that gather only the essential context needed to generate a complete SQL query.
 
 When decomposing, consider the following:
+- Remember not to use double quotation marks but backticks 
 - Only generate sub-queries if the additional context is absolutely required.
 - If retrieving the full dataset is not necessary, include a LIMIT clause to restrict the results.
 - Verify if the search criteria might have ambiguities (e.g., the user name "arturo" could appear as "arturo_henao", "art", "ahc", etc.).

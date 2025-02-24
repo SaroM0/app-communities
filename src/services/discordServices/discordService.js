@@ -30,27 +30,35 @@ async function ensureOrganization() {
 }
 
 /**
- * Inserts or updates a user in the database using their real username.
- * A NULL is inserted into the id column to trigger auto-increment.
+ * Inserts or updates a user in the database using their global username and server nickname.
+ * Only updates if the provided values differ from the current ones.
  *
  * @param {string} discordUserId - The Discord user ID.
  * @param {number} serverInternalId - The internal ID of the server.
- * @param {string} userName - The user's username.
+ * @param {string} globalUserName - The user's global username.
+ * @param {string} serverNickname - The user's nickname in the server.
  * @returns {Promise<number>} The internal ID of the user.
  */
-async function upsertUser(discordUserId, serverInternalId, userName) {
+async function upsertUser(
+  discordUserId,
+  serverInternalId,
+  globalUserName,
+  serverNickname
+) {
   const query = `
-    INSERT INTO \`user\` (id, discord_id, fk_server_id, name)
-    VALUES (NULL, ?, ?, ?)
+    INSERT INTO \`user\` (id, discord_id, fk_server_id, name, nick)
+    VALUES (NULL, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
-      fk_server_id = VALUES(fk_server_id),
-      name = VALUES(name),
+      fk_server_id = IF(fk_server_id <> VALUES(fk_server_id), VALUES(fk_server_id), fk_server_id),
+      name = IF(name <> VALUES(name), VALUES(name), name),
+      nick = IF(nick <> VALUES(nick), VALUES(nick), nick),
       id = LAST_INSERT_ID(id)
   `;
   const [result] = await pool.query(query, [
     discordUserId,
     serverInternalId,
-    userName,
+    globalUserName,
+    serverNickname,
   ]);
   return result.insertId;
 }
@@ -67,7 +75,7 @@ async function upsertChannelUser(channelInternalId, userInternalId, joinedAt) {
   const query = `
     INSERT INTO channel_user (fk_channel_id, fk_user_id, joined_at)
     VALUES (?, ?, ?)
-    ON DUPLICATE KEY UPDATE joined_at = VALUES(joined_at)
+    ON DUPLICATE KEY UPDATE joined_at = IF(joined_at <> VALUES(joined_at), VALUES(joined_at), joined_at)
   `;
   await pool.query(query, [channelInternalId, userInternalId, joinedAt]);
 }
@@ -84,7 +92,8 @@ async function saveServer(server, organizationId) {
     INSERT INTO server (discord_id, fk_organization_id, name)
     VALUES (?, ?, ?)
     ON DUPLICATE KEY UPDATE
-      name = VALUES(name),
+      fk_organization_id = IF(fk_organization_id <> VALUES(fk_organization_id), VALUES(fk_organization_id), fk_organization_id),
+      name = IF(name <> VALUES(name), VALUES(name), name),
       id = LAST_INSERT_ID(id)
   `;
   const [result] = await pool.query(query, [
@@ -107,7 +116,8 @@ async function saveChannel(serverInternalId, channel) {
     INSERT INTO channel (discord_id, fk_server_id, name)
     VALUES (?, ?, ?)
     ON DUPLICATE KEY UPDATE
-      name = VALUES(name),
+      fk_server_id = IF(fk_server_id <> VALUES(fk_server_id), VALUES(fk_server_id), fk_server_id),
+      name = IF(name <> VALUES(name), VALUES(name), name),
       id = LAST_INSERT_ID(id)
   `;
   const [result] = await pool.query(query, [
@@ -130,8 +140,8 @@ async function saveThread(parentChannelInternalId, thread) {
     INSERT INTO thread (discord_id, fk_channel_id, title, description, created_at)
     VALUES (?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
-      title = VALUES(title),
-      description = VALUES(description),
+      title = IF(title <> VALUES(title), VALUES(title), title),
+      description = IF(description <> VALUES(description), VALUES(description), description),
       id = LAST_INSERT_ID(id)
   `;
   // Use thread.name if available, otherwise thread.title.
@@ -167,18 +177,23 @@ async function saveMessage(
   message,
   threadInternalId = null
 ) {
-  // Insert or update the user using their real username.
+  // Determine the user's nickname: if message.member exists, use its nickname or fallback to the global username.
+  const userNick = message.member
+    ? message.member.nickname || message.author.username
+    : message.author.username;
+  // Insert or update the user using their global username and server nickname.
   const userInternalId = await upsertUser(
     message.author.id,
     serverInternalId,
-    message.author.username
+    message.author.username,
+    userNick
   );
 
   const query = `
     INSERT INTO message (discord_id, fk_channel_id, fk_thread_id, fk_user_id, content, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
-      content = VALUES(content),
+      content = IF(content <> VALUES(content), VALUES(content), content),
       id = LAST_INSERT_ID(id)
   `;
   const [result] = await pool.query(query, [
@@ -198,11 +213,10 @@ async function saveMessage(
   if (message.attachments && message.attachments.size > 0) {
     await Promise.all(
       Array.from(message.attachments.values()).map(async (attachment) => {
-        // The query now uses upsert to avoid duplicate attachment records.
         const attachmentQuery = `
           INSERT INTO message_attachment (fk_message_id, attachment_url, created_at)
           VALUES (?, ?, ?)
-          ON DUPLICATE KEY UPDATE created_at = VALUES(created_at)
+          ON DUPLICATE KEY UPDATE created_at = IF(created_at <> VALUES(created_at), VALUES(created_at), created_at)
         `;
         await pool.query(attachmentQuery, [
           messageInternalId,
@@ -221,16 +235,17 @@ async function saveMessage(
       await Promise.all(
         Array.from(users.values()).map(async (user) => {
           // Get the internal ID of the reacting user.
+          const reactionUserNick = user.nickname || user.username;
           const reactionUserInternalId = await upsertUser(
             user.id,
             serverInternalId,
-            user.username
+            user.username,
+            reactionUserNick
           );
-          // The query now uses upsert to avoid duplicate reaction records.
           const reactionQuery = `
             INSERT INTO message_reaction (fk_message_id, fk_user_id, reaction_type, created_at)
             VALUES (?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE created_at = VALUES(created_at)
+            ON DUPLICATE KEY UPDATE created_at = IF(created_at <> VALUES(created_at), VALUES(created_at), created_at)
           `;
           await pool.query(reactionQuery, [
             messageInternalId,
@@ -299,8 +314,7 @@ async function saveMessageMentions(messageInternalId, message) {
 
 /**
  * Inserts or updates a role in the database.
- * The "discord_id" column is omitted as the "role" table does not have it.
- * A NULL is inserted into the id column to trigger auto-increment.
+ * Only updates the name and description if they have changed.
  *
  * @param {object} role - The Discord role object.
  * @returns {Promise<number>} The internal ID of the role.
@@ -310,8 +324,8 @@ async function saveRole(role) {
     INSERT INTO role (name, description, created_at)
     VALUES (?, ?, ?)
     ON DUPLICATE KEY UPDATE
-      name = VALUES(name),
-      description = VALUES(description)
+      name = IF(name <> VALUES(name), VALUES(name), name),
+      description = IF(description <> VALUES(description), VALUES(description), description)
   `;
   const created_at = new Date();
   // Set description based on whether the role is hoisted.
@@ -332,7 +346,7 @@ async function saveRole(role) {
  *    a) Saves the server.
  *    b) Processes all members.
  *    c) Processes text-based channels (excluding threads) and saves their messages.
- *    d) For each channel, fetches both active and archived threads, saves them (if they are valid threads) and then saves their messages.
+ *    d) For each channel, fetches both active and archived threads, saves them (if valid) and then saves their messages.
  * 4. Logs a message to the console after processing each server.
  */
 client.once("ready", async () => {
@@ -345,19 +359,24 @@ client.once("ready", async () => {
       // Save the server and retrieve its internal ID.
       const serverInternalId = await saveServer(server, organizationId);
 
-      // This fetches absolutely all members, even if they haven't sent messages.
+      // Fetch all members.
       await server.members.fetch({ time: 3600000 });
 
       // Upsert all fetched members into the database.
       for (const [memberId, member] of server.members.cache) {
         try {
-          await upsertUser(member.id, serverInternalId, member.user.username);
+          await upsertUser(
+            member.id,
+            serverInternalId,
+            member.user.username,
+            member.nickname || member.user.username
+          );
         } catch (error) {
           console.error(`Error saving member ${member.id}:`, error);
         }
       }
 
-      // Process server roles, skipping the @everyone role (which has the same ID as the server).
+      // Process server roles, skipping the @everyone role.
       server.roles.cache.forEach(async (role) => {
         if (role.id === server.id) return;
         try {
@@ -367,14 +386,14 @@ client.once("ready", async () => {
         }
       });
 
-      // Filter only text-based channels that are not threads.
+      // Filter text-based channels that are not threads.
       const nonThreadChannels = server.channels.cache.filter(
         (ch) => ch.isTextBased() && !ch.isThread()
       );
-      // Map to relate the Discord channel ID with its internal ID (used for threads).
+      // Map to relate the Discord channel ID with its internal ID.
       const parentChannelMap = {};
 
-      // Process each text-based channel (non-thread).
+      // Process each text-based channel.
       for (const [channelId, channel] of nonThreadChannels) {
         let channelInternalId;
         try {
@@ -391,7 +410,7 @@ client.once("ready", async () => {
           continue;
         }
 
-        // Fetch messages in batches of 100 until no more messages are available.
+        // Fetch messages in batches.
         let fetchedMessages = [];
         let lastMessageId = null;
         while (true) {
@@ -417,7 +436,7 @@ client.once("ready", async () => {
           fetchedMessages.push(...batch.values());
           lastMessageId = batch.last().id;
         }
-        // Save all fetched messages for the channel.
+        // Save fetched messages.
         if (fetchedMessages.length > 0) {
           await Promise.all(
             fetchedMessages.map((msg) =>
@@ -427,7 +446,7 @@ client.once("ready", async () => {
         }
       }
 
-      // For each text-based channel, combine active and archived threads.
+      // Process threads in each text-based channel.
       for (const [channelId, channel] of nonThreadChannels) {
         const threads = new Map();
         try {
@@ -456,7 +475,6 @@ client.once("ready", async () => {
         }
         // Process each thread.
         for (const [threadId, thread] of threads) {
-          // Ensure that the object is a valid thread by checking its type.
           if (![10, 11, 12].includes(thread.type)) {
             console.warn(
               `Channel ${thread.id} is not a valid thread type. Skipping.`
@@ -470,13 +488,13 @@ client.once("ready", async () => {
             );
             continue;
           }
-          // Save the thread and retrieve its internal ID.
+          // Save the thread.
           const threadInternalId = await saveThread(
             parentChannelInternalId,
             thread
           );
 
-          // Fetch messages in the thread in batches.
+          // Fetch messages in the thread.
           let fetchedMessages = [];
           let lastMessageId = null;
           while (true) {
@@ -502,7 +520,7 @@ client.once("ready", async () => {
             fetchedMessages.push(...batch.values());
             lastMessageId = batch.last().id;
           }
-          // Save all fetched messages for the thread.
+          // Save fetched thread messages.
           if (fetchedMessages.length > 0) {
             await Promise.all(
               fetchedMessages.map((msg) =>
