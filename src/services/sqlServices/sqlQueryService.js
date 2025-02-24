@@ -2,6 +2,9 @@ const fs = require("fs");
 const path = require("path");
 const pool = require("../../config/db");
 const { generateText } = require("../openaiServices/openaiService");
+const {
+  semanticQueryWithContextFunction,
+} = require("../../config/functionsDeclaration/sqlFunctions");
 
 /**
  * Reads the database schema summary from the file `dbSchemaSummary.md`
@@ -82,28 +85,6 @@ Description: ${userPrompt}
       required: ["sql"],
     };
 
-    const contextualTool = {
-      type: "function",
-      function: {
-        name: "generate_contextualized_sql_query",
-        description:
-          "If there is an issue in the query or if you need specific information to build the complete query, use this function",
-        parameters: {
-          type: "object",
-          properties: {
-            userPrompt: {
-              type: "string",
-              description:
-                "The natural language prompt for generating the SQL query.",
-            },
-          },
-          additionalProperties: false,
-          required: ["userPrompt"],
-        },
-        strict: true,
-      },
-    };
-
     // Call the OpenAI API with the messages and structured output requirements.
     const result = await generateText("", {
       model: "o3-mini",
@@ -111,7 +92,7 @@ Description: ${userPrompt}
       max_completion_tokens: 5000,
       reasoningEffort: "high",
       jsonSchema,
-      tools: [contextualTool],
+      tools: [semanticQueryWithContextFunction],
       messages: [systemMessage, userMessage],
     });
 
