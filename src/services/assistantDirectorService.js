@@ -4,7 +4,8 @@ const {
 } = require("./openaiServices/openaiService");
 
 // Import the function calling definitions
-const assistantFunctions = require("../config/functionsDeclaration/assistantFunctions");
+const semanticQueryWithContext = require("../config/functionsDeclaration/semanticFunctions");
+const generateSQLQueryFunction = require("../config/functionsDeclaration/sqlFunctions");
 
 const { generateSQLQuery } = require("./sqlServices/sqlQueryService");
 const {
