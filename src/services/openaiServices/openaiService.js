@@ -16,7 +16,7 @@ function createAssistantSession(initialMessage, tools) {
         content: initialMessage,
       },
     ],
-    tools: tools || [],
+    functions: tools || [],
   };
 }
 

@@ -66,24 +66,26 @@ rl.question("Enter the option number: ", (answer) => {
       });
     });
   } else if (option === "5") {
-    // New option to use the Query Director Assistant.
-    rl.question(
-      "Enter your query for the Query Director Assistant: ",
-      async (userQuery) => {
-        try {
-          const {
-            runAssistant,
-          } = require("./src/services/assistantDirectorService");
-          const assistantResponse = await runAssistant(userQuery);
-          console.log("\nAssistant Response:");
-          console.log(assistantResponse);
-        } catch (error) {
-          console.error("Error executing the assistant:", error);
-        } finally {
-          rl.close();
+    // Nueva opción para usar el Query Director Assistant en un bucle infinito.
+    function promptQuery() {
+      rl.question(
+        "Enter your query for the Query Director Assistant: ",
+        async (userQuery) => {
+          try {
+            const { runAssistant } = require("./src/services/directorService");
+            const assistantResponse = await runAssistant(userQuery);
+            console.log("\nAssistant Response:");
+            console.log(assistantResponse);
+          } catch (error) {
+            console.error("Error executing the assistant:", error);
+          } finally {
+            // Vuelve a llamar a la función para solicitar una nueva consulta.
+            promptQuery();
+          }
         }
-      }
-    );
+      );
+    }
+    promptQuery();
   } else {
     console.log(
       "Invalid option. Please restart the application and enter 1, 2, 3, 4, or 5."
