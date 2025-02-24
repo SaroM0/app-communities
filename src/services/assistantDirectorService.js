@@ -5,7 +5,6 @@ const {
 // Import the function calling definitions if you need to pass them explicitly (optional)
 const assistantFunctions = require("../../config/assistantFunctions");
 
-// Optionally, you can redefine or reuse the INITIAL_SYSTEM_MESSAGE if needed.
 const INITIAL_SYSTEM_MESSAGE = `
 You are a Query Director Assistant. Your role is to analyze incoming user queries and determine whether they require a relational (SQL) search for quantitative data, a semantic (vectorized) search for qualitative data, or a mixed approach combining both.
 For mixed queries, decompose the query into two distinct parts: one for generating a SQL query and another for performing a semantic search.
