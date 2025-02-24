@@ -231,7 +231,7 @@ async function saveMessage(
   if (message.reactions && message.reactions.cache.size > 0) {
     for (const reaction of message.reactions.cache.values()) {
       // Retrieve the users who reacted.
-      const users = await reaction.users.fetch();
+      const users = await reaction.users.fetch({ time: 3600000 });
       await Promise.all(
         Array.from(users.values()).map(async (user) => {
           // Get the internal ID of the reacting user.
@@ -451,7 +451,9 @@ client.once("ready", async () => {
         const threads = new Map();
         try {
           // Fetch active threads.
-          const activeThreads = await channel.threads.fetchActive();
+          const activeThreads = await channel.threads.fetchActive({
+            time: 3600000,
+          });
           activeThreads.threads.forEach((thread) =>
             threads.set(thread.id, thread)
           );
@@ -463,7 +465,9 @@ client.once("ready", async () => {
         }
         try {
           // Fetch archived threads.
-          const archivedThreads = await channel.threads.fetchArchived();
+          const archivedThreads = await channel.threads.fetchArchived({
+            time: 3600000,
+          });
           archivedThreads.threads.forEach((thread) =>
             threads.set(thread.id, thread)
           );
@@ -498,7 +502,7 @@ client.once("ready", async () => {
           let fetchedMessages = [];
           let lastMessageId = null;
           while (true) {
-            const options = { limit: 100 };
+            const options = { limit: 100, time: 3600000 };
             if (lastMessageId) options.before = lastMessageId;
             let batch;
             try {
