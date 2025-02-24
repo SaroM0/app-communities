@@ -73,6 +73,5 @@ async function semanticQueryWithContext(query, channelId, topK = 10) {
 }
 
 module.exports = {
-  semanticSearch,
   semanticQueryWithContext,
 };

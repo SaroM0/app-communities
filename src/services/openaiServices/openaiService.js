@@ -41,7 +41,7 @@ async function sendAssistantMessage(session, userMessageContent, options = {}) {
     model: options.model || "gpt-4o",
     messages: session.messages,
     tools: session.tools,
-    max_tokens: options.max_tokens || 500,
+    max_tokens: options.max_tokens || 5000,
   };
 
   // Call the OpenAI Assistants endpoint.
@@ -53,7 +53,7 @@ async function sendAssistantMessage(session, userMessageContent, options = {}) {
   return assistantResponse;
 }
 
-// ----- EMBEDDING AND TEXT GENERATION LOGIC -----
+// ----- EMBEDDING LOGIC -----
 
 /**
  * Asynchronously generates an embedding for the provided text using the OpenAI API.
@@ -84,6 +84,8 @@ async function getEmbedding(text, model = process.env.OPENAI_EMBEDDING_MODEL) {
     throw error;
   }
 }
+
+// ----- TEXT GENERATION  -----
 
 /**
  * Asynchronously generates text using the OpenAI chat completions endpoint.

@@ -4,8 +4,9 @@
  */
 const assistantFunctions = [
   {
-    name: "executeSQLQuery",
-    description: "Executes a SQL query on the relational database.",
+    name: "generateSQLQuery",
+    description:
+      "Generates and executes a SQL query on the relational database.",
     parameters: {
       type: "object",
       properties: {
@@ -19,7 +20,7 @@ const assistantFunctions = [
     },
   },
   {
-    name: "performSemanticSearch",
+    name: "semanticQueryWithContext",
     description: "Performs a semantic search on the vectorized database.",
     parameters: {
       type: "object",
